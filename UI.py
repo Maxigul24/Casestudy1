@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from users import User
 
 # Eine Überschrift der ersten Ebene
 st.write("# Gerätemanagement")
@@ -54,9 +55,9 @@ with tab1:
             # Wartungsinformationen
             st.write("**Wartungsinformationen**")
             if selected_device["Status"] == "In Wartung" and selected_device["Wartung_bis"]:
-                st.info(f"⚠️ In Wartung bis: {selected_device['Wartung_bis']}")
+                st.info(f"In Wartung bis: {selected_device['Wartung_bis']}")
             else:
-                st.info(f"🔧 Nächste Wartung in {selected_device['Tage_bis_Wartung']} Tagen ({selected_device['Nächste_Wartung']})")
+                st.info(f"Nächste Wartung in {selected_device['Tage_bis_Wartung']} Tagen ({selected_device['Nächste_Wartung']})")
             
             col1, col2 = st.columns(2)
             with col1:
@@ -86,13 +87,9 @@ with tab1:
 with tab2:
     st.header("Nutzerverwaltung")
     
-    # Mock-Daten
-    users = [
-        {"Name": "Max Müller", "Email": "max.mueller@hochschule.de", "Rolle": "Administrator"},
-        {"Name": "Anna Schmidt", "Email": "anna.schmidt@hochschule.de", "Rolle": "Mitarbeiter"},
-        {"Name": "Tom Weber", "Email": "tom.weber@hochschule.de", "Rolle": "Student"},
-        {"Name": "Lisa Klein", "Email": "lisa.klein@hochschule.de", "Rolle": "Student"},
-    ]
+    # Lade alle User aus der Datenbank
+    user_objects = User.find_all()
+    users = [{"Name": u.name, "Email": u.id} for u in user_objects]
     
     st.subheader("Alle Nutzer")
     
@@ -118,8 +115,6 @@ with tab2:
         with st.form("edit_user"):
             edit_name = st.text_input("Name", value=selected_user["Name"])
             edit_email = st.text_input("Email", value=selected_user["Email"])
-            edit_rolle = st.selectbox("Rolle", ["Administrator", "Mitarbeiter", "Student"], 
-                                      index=["Administrator", "Mitarbeiter", "Student"].index(selected_user["Rolle"]))
             
             col1, col2 = st.columns(2)
             with col1:
@@ -128,20 +123,33 @@ with tab2:
                 deleted = st.form_submit_button("Nutzer löschen", type="secondary")
             
             if submitted:
+                # Aktualisiere User in der Datenbank
+                user = User(edit_email, edit_name)
+                user.store_data()
                 st.success(f"Nutzer {edit_name} wurde aktualisiert!")
+                st.rerun()
             if deleted:
+                # Lösche User aus der Datenbank
+                user = User(selected_user["Email"], selected_user["Name"])
+                user.delete()
                 st.warning(f"Nutzer {selected_user['Name']} wurde gelöscht!")
+                st.rerun()
     
     st.divider()
-    if st.button("Neuen Nutzer hinzufügen"):
-        st.subheader("Neuen Nutzer hinzufügen")
-        with st.form("new_user"):
-            name = st.text_input("Name")
-            email = st.text_input("Email")
-            rolle = st.selectbox("Rolle", ["Administrator", "Mitarbeiter", "Student"])
-            submitted = st.form_submit_button("Nutzer speichern")
-            if submitted:
+    st.subheader("Neuen Nutzer hinzufügen")
+    with st.form("new_user"):
+        name = st.text_input("Name")
+        email = st.text_input("Email")
+        submitted = st.form_submit_button("Nutzer speichern")
+        if submitted:
+            if name and email:
+                # Speichere neuen User in der Datenbank
+                new_user = User(email, name)
+                new_user.store_data()
                 st.success(f"Nutzer {name} wurde hinzugefügt!")
+                st.rerun()
+            else:
+                st.error("Bitte Name und Email eingeben!")
         
 with tab3:
     st.header("Reservierungen")

@@ -1,40 +1,43 @@
-import json
+import os
+from tinydb import TinyDB, Query
+
 
 class User:
+    # Class variable that is shared between all instances of the class
+    db_connector = TinyDB(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database.json')).table('users')
+    
     def __init__(self, id, name) -> None:
         """Create a new user based on the given name and id"""
         self.name = name
         self.id = id
 
-    def store_data(self)-> None:
+    def store_data(self) -> None:
         """Save the user to the database"""
-        # Load existing database
-        with open('database.json', 'r') as f:
-            data = json.load(f)
-        
-        # Create users section if it doesn't exist
-        if 'users' not in data:
-            data['users'] = {}
-        data['users'][self.id] = {
-            'name': self.name,
-            'id': self.id
-        }
-
-        with open('database.json', 'w') as f:
-            json.dump(data, f, indent=2)
-
+        print("Storing user data...")
+        # Check if the user already exists in the database
+        UserQuery = Query()
+        result = User.db_connector.search(UserQuery.id == self.id)
+        if result:
+            # Update the existing record with the current instance's data
+            result = self.db_connector.update(self.__dict__, doc_ids=[result[0].doc_id])
+            print("User data updated.")
+        else:
+            # If the user doesn't exist, insert a new record
+            self.db_connector.insert(self.__dict__)
+            print("User data inserted.")
 
     def delete(self) -> None:
         """Delete the user from the database"""
-       
-        with open('database.json', 'r') as f:
-            data = json.load(f)
-        
-        if 'users' in data and self.id in data['users']:
-            del data['users'][self.id]
-
-        with open('database.json', 'w') as f:
-            json.dump(data, f, indent=2)
+        print("Deleting user data...")
+        # Check if the user exists in the database
+        UserQuery = Query()
+        result = self.db_connector.search(UserQuery.id == self.id)
+        if result:
+            # Delete the record from the database
+            self.db_connector.remove(doc_ids=[result[0].doc_id])
+            print("User data deleted.")
+        else:
+            print("User data not found.")
     
     def __str__(self):
         return f"User {self.id} - {self.name}"
@@ -42,18 +45,15 @@ class User:
     def __repr__(self):
         return self.__str__()
     
-    @staticmethod
+    @classmethod
     def find_all(cls) -> list:
         """Find all users in the database"""
-        with open('database.json', 'r') as f:
-            data = json.load(f)
         users = []
-        if 'users' in data:
-            for user_id, user_data in data['users'].items():
-                users.append(User(user_data['id'], user_data['name']))
+        for user_data in cls.db_connector.all():
+            users.append(cls(user_data['id'], user_data['name']))
         return users
 
     @classmethod
-    def find_by_attribute(cls, by_attribute : str, attribute_value : str) -> 'User':
+    def find_by_attribute(cls, by_attribute: str, attribute_value: str, num_to_return=1):
         """From the matches in the database, select the user with the given attribute value"""
         pass

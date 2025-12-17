@@ -23,19 +23,16 @@ class Device():
         self.next_maintenance = self.__creation_date + timedelta(days=self.__maintenance_interval)
         self.__last_maintenance_date = None
         
-    @property
     def creation_date(self):
         return self.__creation_date
     
-    @property
+
     def last_update(self):
         return self.__last_update
     
-    @property
     def maintenance_interval(self):
         return self.__maintenance_interval
     
-    @maintenance_interval.setter
     def maintenance_interval(self, days: int):
         if days < 1:
             raise ValueError("Wartungsintervall muss mindestens 1 Tag sein")
