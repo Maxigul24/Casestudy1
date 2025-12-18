@@ -1,248 +1,267 @@
 import streamlit as st
 import pandas as pd
-from users import User
+from datetime import datetime
 
-# Eine Überschrift der ersten Ebene
+# Wir versuchen die Backend-Klassen zu laden.
+# Falls 'devices.py' noch Leerzeichen hat oder fehlt, fangen wir den Fehler ab.
+try:
+    from devices import Device
+    from users import User
+    BACKEND_LOADED = True
+except ImportError as e:
+    st.error(f"Backend-Fehler: {e}. Bitte stelle sicher, dass 'devices.py' korrekt benannt ist.")
+    BACKEND_LOADED = False
+
 st.write("# Gerätemanagement")
 
 tab1, tab2, tab3, tab4 = st.tabs(["Geräte", "Nutzerverwaltung", "Reservierungen", "Wartungsplan"])
 
+# --- HILFSFUNKTIONEN ---
+def load_all_devices_safe():
+    """Lädt Geräte sicher, auch wenn die DB leer ist oder Fehler wirft."""
+    if not BACKEND_LOADED: return []
+    try:
+        return Device.find_all()
+    except Exception:
+        return []
+
+# --- TAB 1: GERÄTE ---
 with tab1:
     st.header("Geräteübersicht")
     
-    # Mock-Daten für Geräte
-    from datetime import datetime, timedelta
+    all_devices = load_all_devices_safe()
     
-    devices = [
-        {"Name": "Laser-Cutter", "Typ": "Laser", "Verantwortlich": "Max Müller", "Status": "Verfügbar", 
-         "Nächste_Wartung": "2025-12-25", "Wartung_bis": None, "Tage_bis_Wartung": 10},
-        {"Name": "3D-Drucker", "Typ": "3D-Druck", "Verantwortlich": "Anna Schmidt", "Status": "In Wartung", 
-         "Nächste_Wartung": "2025-12-15", "Wartung_bis": "2025-12-18", "Tage_bis_Wartung": 0},
-        {"Name": "CNC-Fräse", "Typ": "Fräse", "Verantwortlich": "Tom Weber", "Status": "Reserviert", 
-         "Nächste_Wartung": "2026-01-05", "Wartung_bis": None, "Tage_bis_Wartung": 21},
-        {"Name": "Oszilloskop", "Typ": "Messinstrument", "Verantwortlich": "Lisa Klein", "Status": "Verfügbar", 
-         "Nächste_Wartung": "2025-12-20", "Wartung_bis": None, "Tage_bis_Wartung": 5},
-    ]
+    # Daten für die Tabelle aufbereiten
+    devices_list = []
+    for dev in all_devices:
+        # Wir fangen Fehler bei der Datumsberechnung ab
+        try:
+            days = dev.get_days_until_maintenance()
+            next_maint = dev.next_maintenance.strftime('%Y-%m-%d')
+        except:
+            days = 0
+            next_maint = "Fehler"
+
+        devices_list.append({
+            "ID": dev.device_id,
+            "Name": dev.device_name,
+            "Typ": "Standard", 
+            "Verantwortlich": dev.managed_by_user_id,
+            "Status": "Aktiv" if dev.is_active else "In Wartung/Inaktiv",
+            "Nächste_Wartung": next_maint,
+            "Tage_bis_Wartung": days
+        })
     
-    st.subheader("Alle Geräte")
+    st.subheader(f"Alle Geräte ({len(devices_list)})")
     
-    # Geräte als Tabelle anzeigen
-    df_devices = pd.DataFrame(devices)
+    df_devices = pd.DataFrame(devices_list)
     
-    event_devices = st.dataframe(
-        df_devices,
-        use_container_width=True,
-        selection_mode="single-row",
-        on_select="rerun",
-        key="device_table"
-    )
-    
-    # Wenn eine Zeile ausgewählt wurde
-    if event_devices.selection.rows:
+    # Tabelle anzeigen
+    if not df_devices.empty:
+        event_devices = st.dataframe(
+            df_devices,
+            use_container_width=True,
+            selection_mode="single-row",
+            on_select="rerun",
+            key="device_table",
+            hide_index=True
+        )
+    else:
+        st.info("Keine Geräte gefunden.")
+        event_devices = None
+
+    # Bearbeiten-Logik
+    if event_devices and event_devices.selection.rows:
         selected_idx = event_devices.selection.rows[0]
-        selected_device = devices[selected_idx]
+        selected_device_data = devices_list[selected_idx]
         
-        st.divider()
-        st.subheader(f"Gerät bearbeiten: {selected_device['Name']}")
+        # Das echte Objekt aus der Liste suchen
+        real_device = next((d for d in all_devices if d.device_id == selected_device_data["ID"]), None)
         
-        with st.form("edit_device"):
-            edit_name = st.text_input("Name", value=selected_device["Name"])
-            edit_typ = st.text_input("Typ", value=selected_device["Typ"])
-            edit_verantwortlich = st.text_input("Verantwortlich", value=selected_device["Verantwortlich"])
-            edit_status = st.selectbox("Status", ["Verfügbar", "In Wartung", "Reserviert", "Defekt"], 
-                                       index=["Verfügbar", "In Wartung", "Reserviert", "Defekt"].index(selected_device["Status"]))
+        if real_device:
+            st.divider()
+            st.subheader(f"Gerät bearbeiten: {real_device.device_name}")
             
-            # Wartungsinformationen
-            st.write("**Wartungsinformationen**")
-            if selected_device["Status"] == "In Wartung" and selected_device["Wartung_bis"]:
-                st.info(f"In Wartung bis: {selected_device['Wartung_bis']}")
-            else:
-                st.info(f"Nächste Wartung in {selected_device['Tage_bis_Wartung']} Tagen ({selected_device['Nächste_Wartung']})")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                submitted = st.form_submit_button("Änderungen speichern")
-            with col2:
-                deleted = st.form_submit_button("Gerät löschen", type="secondary")
-            
-            if submitted:
-                st.success(f"Gerät {edit_name} wurde aktualisiert!")
-            if deleted:
-                st.warning(f"Gerät {selected_device['Name']} wurde gelöscht!")
+            with st.form("edit_device"):
+                edit_name = st.text_input("Name", value=real_device.device_name)
+                
+                # User-Dropdown
+                try:
+                    all_users = [u.id for u in User.find_all()]
+                except:
+                    all_users = []
+                
+                current_user = real_device.managed_by_user_id
+                if current_user in all_users:
+                    u_index = all_users.index(current_user)
+                    edit_verantwortlich = st.selectbox("Verantwortlich", all_users, index=u_index)
+                else:
+                    edit_verantwortlich = st.text_input("Verantwortlich", value=current_user)
+
+                # Status bearbeiten
+                status_options = ["Aktiv", "In Wartung"]
+                current_status_idx = 0 if real_device.is_active else 1
+                edit_status = st.selectbox("Status", status_options, index=current_status_idx)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    submitted = st.form_submit_button("Speichern")
+                with col2:
+                    deleted = st.form_submit_button("Löschen", type="primary")
+                
+                if submitted:
+                    real_device.device_name = edit_name
+                    real_device.set_managed_by_user_id(edit_verantwortlich)
+                    # Status Logik
+                    real_device.is_active = (edit_status == "Aktiv")
+                    real_device.store_data()
+                    st.success("Gespeichert!")
+                    st.rerun()
+                if deleted:
+                    real_device.delete()
+                    st.warning("Gelöscht!")
+                    st.rerun()
     
     st.divider()
-    
-    # Button zum Hinzufügen neuer Geräte
-    if st.button("Neues Gerät hinzufügen"):
-        st.subheader("Neues Gerät hinzufügen")
+    # Neues Gerät
+    with st.expander("Neues Gerät hinzufügen"):
         with st.form("new_device"):
+            new_id = st.number_input("ID", step=1, min_value=1)
             name = st.text_input("Name")
-            typ = st.text_input("Typ")
-            verantwortlich = st.text_input("Verantwortlich")
-            status = st.selectbox("Status", ["Verfügbar", "In Wartung", "Reserviert", "Defekt"])
+            
+            try:
+                user_options = [u.id for u in User.find_all()]
+            except:
+                user_options = []
+                
+            verantwortlich = st.selectbox("Verantwortlich", user_options) if user_options else st.text_input("Verantwortlich (Email)")
+            
             submitted = st.form_submit_button("Gerät speichern")
             if submitted:
-                st.success(f"Gerät {name} wurde hinzugefügt!")
+                if BACKEND_LOADED:
+                    new_dev = Device(new_id, name, verantwortlich)
+                    new_dev.store_data()
+                    st.success(f"Gerät {name} angelegt!")
+                    st.rerun()
 
+# --- TAB 2: NUTZER ---
 with tab2:
     st.header("Nutzerverwaltung")
     
-    # Lade alle User aus der Datenbank
-    user_objects = User.find_all()
-    users = [{"Name": u.name, "Email": u.id} for u in user_objects]
-    
-    st.subheader("Alle Nutzer")
-    
-   
-    df = pd.DataFrame(users)
-    
-    event = st.dataframe(
-        df,
-        use_container_width=True,
-        selection_mode="single-row",
-        on_select="rerun",
-        key="user_table"
-    )
-    
-    # Wenn eine Zeile ausgewählt wurde
-    if event.selection.rows:
-        selected_idx = event.selection.rows[0]
-        selected_user = users[selected_idx]
+    try:
+        user_objects = User.find_all()
+    except:
+        user_objects = []
         
-        st.divider()
-        st.subheader(f"Nutzer bearbeiten: {selected_user['Name']}")
-        
-        with st.form("edit_user"):
-            edit_name = st.text_input("Name", value=selected_user["Name"])
-            edit_email = st.text_input("Email", value=selected_user["Email"])
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                submitted = st.form_submit_button("Änderungen speichern")
-            with col2:
-                deleted = st.form_submit_button("Nutzer löschen", type="secondary")
-            
-            if submitted:
-                # Aktualisiere User in der Datenbank
-                user = User(edit_email, edit_name)
-                user.store_data()
-                st.success(f"Nutzer {edit_name} wurde aktualisiert!")
-                st.rerun()
-            if deleted:
-                # Lösche User aus der Datenbank
-                user = User(selected_user["Email"], selected_user["Name"])
-                user.delete()
-                st.warning(f"Nutzer {selected_user['Name']} wurde gelöscht!")
-                st.rerun()
+    users_data = [{"Name": u.name, "Email": u.id} for u in user_objects]
+    st.dataframe(pd.DataFrame(users_data), use_container_width=True, hide_index=True)
     
     st.divider()
-    st.subheader("Neuen Nutzer hinzufügen")
     with st.form("new_user"):
         name = st.text_input("Name")
         email = st.text_input("Email")
-        submitted = st.form_submit_button("Nutzer speichern")
-        if submitted:
-            if name and email:
-                # Speichere neuen User in der Datenbank
-                new_user = User(email, name)
-                new_user.store_data()
-                st.success(f"Nutzer {name} wurde hinzugefügt!")
-                st.rerun()
-            else:
-                st.error("Bitte Name und Email eingeben!")
-        
+        if st.form_submit_button("Nutzer speichern") and BACKEND_LOADED:
+            User(email, name).store_data()
+            st.success("Nutzer angelegt!")
+            st.rerun()
+
+# --- TAB 3: RESERVIERUNGEN (Visuelle Demo) ---
 with tab3:
     st.header("Reservierungen")
+    st.info("Dieses Modul läuft aktuell im Demo-Modus (keine Datenbank-Anbindung).")
     
-    # Mock-Daten
+    # Mock-Daten (damit die Tabelle nicht leer ist)
     reservations = [
-        {"Gerät": "Laser-Cutter", "Reserviert von": "Prof. Müller", "Start": "2025-12-16", "Ende": "2025-12-20", "Grund": "Forschungsprojekt"},
-        {"Gerät": "3D-Drucker", "Reserviert von": "Anna Schmidt", "Start": "2025-12-18", "Ende": "2025-12-22", "Grund": "Lehrlabor"},
-        {"Gerät": "CNC-Fräse", "Reserviert von": "Tom Weber", "Start": "2025-12-15", "Ende": "2025-12-17", "Grund": "Abschlussarbeit"},
-        {"Gerät": "Laser-Cutter", "Reserviert von": "Lisa Klein", "Start": "2025-12-22", "Ende": "2025-12-25", "Grund": "Studentenprojekt"},
+        {"Gerät": "Laser-Cutter", "Von": "one@mci.edu", "Start": "2025-12-16", "Ende": "2025-12-20"},
+        {"Gerät": "3D-Drucker", "Von": "two@mci.edu", "Start": "2025-12-18", "Ende": "2025-12-22"},
     ]
-    
-    st.subheader("Alle Reservierungen")
-    
-    df_reservations = pd.DataFrame(reservations)
-    st.dataframe(df_reservations, use_container_width=True)
+    st.dataframe(pd.DataFrame(reservations), use_container_width=True)
     
     st.divider()
+    st.subheader("Neue Reservierung")
     
-    # Neue Reservierung hinzufügen
-    st.subheader("Neue Reservierung erstellen")
     with st.form("new_reservation"):
-        geraet = st.selectbox("Gerät", ["Laser-Cutter", "3D-Drucker", "CNC-Fräse", "Oszilloskop"])
-        reserviert_von = st.text_input("Reserviert von")
-        col1, col2 = st.columns(2)
-        with col1:
-            start_datum = st.date_input("Start-Datum")
-        with col2:
-            end_datum = st.date_input("End-Datum")
-        grund = st.text_area("Grund der Reservierung")
+        # Wir versuchen echte Gerätenamen zu laden, sonst Fallback
+        devs = load_all_devices_safe()
+        dev_names = [d.device_name for d in devs] if devs else ["Beispielgerät 1", "Beispielgerät 2"]
         
-        submitted = st.form_submit_button("Reservierung speichern")
-        if submitted:
-            st.success(f"Reservierung für {geraet} wurde erstellt!")
+        st.selectbox("Gerät", dev_names)
+        st.text_input("Reserviert von")
+        c1, c2 = st.columns(2)
+        c1.date_input("Start")
+        c2.date_input("Ende")
+        
+        if st.form_submit_button("Reservieren"):
+            st.success("Reservierung (simuliert) erfolgreich!")
 
+# --- TAB 4: WARTUNGSPLAN ---
 with tab4:
     st.header("Wartungsplan")
     
-    # Geräte in Wartung
-    st.subheader("Geräte in Wartung")
-    geraete_in_wartung = [d for d in devices if d["Status"] == "In Wartung"]
+    all_devices_maint = load_all_devices_safe()
+
+    # 1. Geräte in Wartung
+    st.subheader("Geräte aktuell in Wartung")
+    # HINWEIS: Wenn devices.py den Status nicht lädt, ist diese Liste immer leer.
+    in_wartung = [d for d in all_devices_maint if not d.is_active]
     
-    if geraete_in_wartung:
-        wartung_data = []
-        for device in geraete_in_wartung:
-            wartung_ende = datetime.strptime(device["Wartung_bis"], "%Y-%m-%d")
-            tage_verbleibend = (wartung_ende - datetime.now()).days
-            wartung_data.append({
-                "Gerät": device["Name"],
-                "Typ": device["Typ"],
-                "Verantwortlich": device["Verantwortlich"],
-                "Wartung bis": device["Wartung_bis"],
-                "Verbleibende Tage": tage_verbleibend
-            })
-        df_wartung = pd.DataFrame(wartung_data)
-        st.dataframe(df_wartung, use_container_width=True)
+    if in_wartung:
+        data_w = [{"Gerät": d.device_name, "Verantwortlich": d.managed_by_user_id} for d in in_wartung]
+        st.dataframe(pd.DataFrame(data_w), use_container_width=True)
     else:
-        st.info("Aktuell befinden sich keine Geräte in Wartung.")
-    
+        st.info("Keine Geräte als 'Inaktiv / In Wartung' markiert.")
+
     st.divider()
     
-    # Anstehende Wartungen
+    # 2. Anstehende Wartungen
     st.subheader("Anstehende Wartungen")
     
-    # Sort
-    # iere Geräte nach Tagen bis zur Wartung
-    wartungsplan = sorted(
-        [d for d in devices if d["Status"] != "In Wartung"],
-        key=lambda x: x["Tage_bis_Wartung"]
-    )
+    # Sicherstellen, dass die Datumsberechnung nicht crasht
+    valid_devices = []
+    for d in all_devices_maint:
+        if d.is_active: # Nur aktive Geräte planen
+            try:
+                # Testen ob Berechnung klappt
+                d.get_days_until_maintenance()
+                valid_devices.append(d)
+            except:
+                continue
+
+    # Sortieren
+    valid_devices.sort(key=lambda x: x.get_days_until_maintenance())
     
-    wartungsplan_data = []
-    for device in wartungsplan:
-        tage = device["Tage_bis_Wartung"]
-        wartungsplan_data.append({
-            "Gerät": device["Name"],
-            "Typ": device["Typ"],
-            "Nächste Wartung": device["Nächste_Wartung"],
-            "Tage bis Wartung": device["Tage_bis_Wartung"],
-            "Verantwortlich": device["Verantwortlich"]
+    plan_data = []
+    for d in valid_devices:
+        plan_data.append({
+            "Gerät": d.device_name,
+            "Nächste Wartung": d.next_maintenance.strftime('%Y-%m-%d'),
+            "Tage verbleibend": d.get_days_until_maintenance(),
+            "Kosten": f"{d.maintenance_cost} €"
         })
-    
-    df_wartungsplan = pd.DataFrame(wartungsplan_data)
-    st.dataframe(df_wartungsplan, use_container_width=True)    
-    st.divider()
-    
-    # Wartung planen
-    st.subheader("Wartung planen")
-    with st.form("plan_wartung"):
-        geraet_wartung = st.selectbox("Gerät", [d["Name"] for d in devices])
-        neues_wartungsdatum = st.date_input("Nächstes Wartungsdatum")
-        wartungsnotizen = st.text_area("Notizen")
         
-        submitted = st.form_submit_button("Wartung planen")
-        if submitted:
-            st.success(f"Wartung für {geraet_wartung} am {neues_wartungsdatum} geplant!")
+    df_plan = pd.DataFrame(plan_data)
+    
+    # Einfärbung
+    def highlight_urgent(val):
+        color = ''
+        if isinstance(val, int):
+            if val < 0: color = 'background-color: #ffcccc'
+            elif val < 10: color = 'background-color: #ffffcc'
+        return color
+
+    if not df_plan.empty:
+        st.dataframe(df_plan.style.map(highlight_urgent, subset=['Tage verbleibend']), use_container_width=True, hide_index=True)
+        
+        # Wartung durchführen Button
+        st.write("### Wartung abschließen")
+        with st.form("complete_maint"):
+            target_name = st.selectbox("Gerät wählen", [d.device_name for d in valid_devices])
+            if st.form_submit_button("Wartung als erledigt markieren"):
+                dev_obj = next((d for d in valid_devices if d.device_name == target_name), None)
+                if dev_obj:
+                    dev_obj.complete_maintenance()
+                    dev_obj.store_data()
+                    st.success(f"Wartung für {target_name} protokolliert!")
+                    st.rerun()
+    else:
+        st.info("Keine aktiven Geräte für den Wartungsplan.")
