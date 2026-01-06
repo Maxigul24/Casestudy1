@@ -142,81 +142,101 @@ with tab1:
 with tab2:
     st.header("Nutzerverwaltung")
     
-    # Lade alle User aus der Datenbank
-    user_objects = User.find_all()
-    users = [{"Name": u.name, "Email": u.id} for u in user_objects]
+    # ---------------------------------------------------------
+    # 1. DATEN LADEN & TABELLE ANZEIGEN
+    # ---------------------------------------------------------
+    # Alle User-Objekte aus der Datenbank laden
+    all_users = User.find_all()
     
-    st.subheader("Alle Nutzer")
+    # Daten für DataFrame aufbereiten
+    users_data = []
+    for u in all_users:
+        users_data.append({
+            "Name": u.name,
+            "Email": u.id  # In deiner Klasse ist die ID die E-Mail
+        })
     
-   
-    df = pd.DataFrame(users)
+    df_users = pd.DataFrame(users_data)
     
-    event = st.dataframe(
-        df,
+    # Tabelle anzeigen
+    event_users = st.dataframe(
+        df_users,
         use_container_width=True,
         selection_mode="single-row",
         on_select="rerun",
-        key="user_table"
+        key="user_table",
+        hide_index=True
     )
     
-    # Wenn eine Zeile ausgewählt wurde
-    if event_devices.selection.rows:
-        selected_idx = event_devices.selection.rows[0]
-        selected_device_id = df_devices.iloc[selected_idx]["ID"]
+    # ---------------------------------------------------------
+    # 2. NUTZER BEARBEITEN
+    # ---------------------------------------------------------
+    if event_users.selection.rows:
+        selected_idx = event_users.selection.rows[0]
+        # Wir holen die Email (ID) aus der angeklickten Zeile
+        selected_email = df_users.iloc[selected_idx]["Email"]
         
-        # Objekt aus DB laden
-        device_obj = Device.find_by_attribute("device_id", int(selected_device_id))
+        # Das passende Objekt aus unserer Liste suchen
+        # (Da wir keine find_by_attribute Methode in User haben, filtern wir die Liste)
+        selected_user_obj = next((u for u in all_users if u.id == selected_email), None)
         
-        if device_obj:
+        if selected_user_obj:
             st.divider()
-            st.subheader(f"Gerät bearbeiten: {device_obj.device_name}")
+            st.subheader(f"Nutzer bearbeiten: {selected_user_obj.name}")
             
-            with st.form("edit_device"):
-                # Vorbelegung mit echten Daten
-                edit_name = st.text_input("Name", value=device_obj.device_name)
-                edit_typ = st.text_input("Typ", value=device_obj.device_type)
-                edit_verantwortlich = st.text_input("Verantwortlich", value=device_obj.managed_by_user_id)
+            # WICHTIG: Einzigartiger Key für das Formular
+            with st.form(f"edit_user_{selected_user_obj.id}"):
+                edit_name = st.text_input("Name", value=selected_user_obj.name)
+                # Die Email ist die ID -> Wir erlauben hier keine Änderung, um Datenmüll zu vermeiden
+                st.text_input("Email (ID)", value=selected_user_obj.id, disabled=True)
+                st.caption("Hinweis: Um die E-Mail zu ändern, bitte Nutzer löschen und neu anlegen.")
                 
-                # Status Dropdown
-                status_options = ["Verfügbar", "In Wartung", "Reserviert", "Defekt"]
-                # Index finden (Fallback auf 0, falls aktueller Status unbekannt)
-                try:
-                    curr_index = status_options.index(device_obj.device_status)
-                except ValueError:
-                    curr_index = 0
-                    
-                edit_status = st.selectbox("Status", status_options, index=curr_index)
-                
-                submitted = st.form_submit_button("Änderungen speichern")
+                col1, col2 = st.columns(2)
+                with col1:
+                    submitted = st.form_submit_button("Änderungen speichern")
+                with col2:
+                    deleted = st.form_submit_button("Nutzer löschen", type="secondary")
                 
                 if submitted:
-                    # Werte im Objekt überschreiben
-                    device_obj.device_name = edit_name
-                    device_obj.device_type = edit_typ
-                    device_obj.managed_by_user_id = edit_verantwortlich
-                    device_obj.device_status = edit_status
-                    
+                    # Objekt aktualisieren
+                    selected_user_obj.name = edit_name
                     # Speichern
-                    device_obj.store_data()
-                    st.success("Gespeichert!")
+                    selected_user_obj.store_data()
+                    st.success(f"Nutzer {edit_name} aktualisiert!")
+                    st.rerun()
+                    
+                if deleted:
+                    selected_user_obj.delete()
+                    st.warning(f"Nutzer gelöscht!")
                     st.rerun()
     
     st.divider()
-    st.subheader("Neuen Nutzer hinzufügen")
-    with st.form("new_user"):
-        name = st.text_input("Name")
-        email = st.text_input("Email")
-        submitted = st.form_submit_button("Nutzer speichern")
-        if submitted:
-            if name and email:
-                # Speichere neuen User in der Datenbank
-                new_user = User(email, name)
-                new_user.store_data()
-                st.success(f"Nutzer {name} wurde hinzugefügt!")
-                st.rerun()
-            else:
-                st.error("Bitte Name und Email eingeben!")
-        
+
+    # ---------------------------------------------------------
+    # 3. NEUEN NUTZER HINZUFÜGEN
+    # ---------------------------------------------------------
+    with st.expander("Neuen Nutzer hinzufügen"):
+        st.subheader("Neuen Nutzer anlegen")
+        with st.form("new_user_form"):
+            new_name = st.text_input("Name")
+            new_email = st.text_input("Email (wird als ID verwendet)")
+            
+            submitted_new = st.form_submit_button("Nutzer speichern")
+            
+            if submitted_new:
+                if new_name and new_email:
+                    # Prüfen, ob Email schon existiert (Optional, aber gut)
+                    existing = next((u for u in all_users if u.id == new_email), None)
+                    if existing:
+                        st.error("Ein Nutzer mit dieser E-Mail existiert bereits!")
+                    else:
+                        # Objekt erstellen
+                        new_user = User(id=new_email, name=new_name)
+                        new_user.store_data()
+                        st.success(f"Nutzer {new_name} angelegt!")
+                        st.rerun()
+                else:
+                    st.warning("Bitte Name und Email eingeben.")        
 with tab3:
     st.header("Reservierungen")
     
