@@ -17,6 +17,9 @@ with tab1:
     # ---------------------------------------------------------
     # Echte Daten aus der Datenbank laden
     all_devices = Device.find_all()
+    # Nutzerliste für Dropdowns laden
+    all_users_for_devices = User.find_all()
+    user_emails = [u.id for u in all_users_for_devices]
     
     # Daten für den DataFrame aufbereiten
     devices_data = []
@@ -68,7 +71,13 @@ with tab1:
                 # Vorbefüllte Werte aus dem OBJEKT
                 edit_name = st.text_input("Name", value=selected_device_obj.device_name)
                 edit_typ = st.text_input("Typ", value=selected_device_obj.device_type)
-                edit_verantwortlich = st.text_input("Verantwortlich", value=selected_device_obj.managed_by_user_id)
+                
+                # Verantwortlich Dropdown mit allen Nutzern
+                if user_emails and selected_device_obj.managed_by_user_id in user_emails:
+                    curr_user_index = user_emails.index(selected_device_obj.managed_by_user_id)
+                else:
+                    curr_user_index = 0
+                edit_verantwortlich = st.selectbox("Verantwortlich", user_emails, index=curr_user_index if user_emails else 0)
                 
                 # Status Dropdown Logic
                 status_options = ["Verfügbar", "In Wartung", "Reserviert", "Defekt"]
@@ -104,17 +113,32 @@ with tab1:
     st.divider()
     
     # ---------------------------------------------------------
-    # 3. NEUES GERÄT HINZUFÜGEN (Expander)
+    # 3. NEUES GERÄT HINZUFÜGEN
     # ---------------------------------------------------------
-    with st.expander("Neues Gerät hinzufügen"):
+    # Session State für Expander-Steuerung
+    if 'show_add_device' not in st.session_state:
+        st.session_state.show_add_device = False
+    
+    # Button zum Öffnen des Formulars
+    if not st.session_state.show_add_device:
+        if st.button("➕ Neues Gerät hinzufügen"):
+            st.session_state.show_add_device = True
+            st.rerun()
+    
+    # Formular nur anzeigen, wenn show_add_device True ist
+    if st.session_state.show_add_device:
         st.subheader("Neues Gerät anlegen")
         with st.form("new_device_form"):
             new_name = st.text_input("Gerätename")
             new_typ = st.text_input("Gerätetyp (z.B. Laser, 3D-Drucker)")
-            new_verantwortlich = st.text_input("Verantwortliche User-ID (E-Mail)")
+            new_verantwortlich = st.selectbox("Verantwortlicher Nutzer", user_emails if user_emails else ["Keine Nutzer vorhanden"])
             new_status = st.selectbox("Status", ["Verfügbar", "In Wartung", "Reserviert", "Defekt"])
             
-            submitted_new = st.form_submit_button("Gerät speichern")
+            col1, col2 = st.columns(2)
+            with col1:
+                submitted_new = st.form_submit_button("Gerät speichern")
+            with col2:
+                cancel = st.form_submit_button("Abbrechen")
             
             if submitted_new:
                 if new_name and new_verantwortlich:
@@ -136,9 +160,14 @@ with tab1:
                     
                     new_device.store_data()
                     st.success(f"Gerät {new_name} angelegt!")
+                    st.session_state.show_add_device = False
                     st.rerun()
                 else:
                     st.warning("Bitte Name und Verantwortlichen angeben.")
+            
+            if cancel:
+                st.session_state.show_add_device = False
+                st.rerun()
 with tab2:
     st.header("Nutzerverwaltung")
     
@@ -215,13 +244,28 @@ with tab2:
     # ---------------------------------------------------------
     # 3. NEUEN NUTZER HINZUFÜGEN
     # ---------------------------------------------------------
-    with st.expander("Neuen Nutzer hinzufügen"):
+    # Session State für Expander-Steuerung
+    if 'show_add_user' not in st.session_state:
+        st.session_state.show_add_user = False
+    
+    # Button zum Öffnen des Formulars
+    if not st.session_state.show_add_user:
+        if st.button("➕ Neuen Nutzer hinzufügen"):
+            st.session_state.show_add_user = True
+            st.rerun()
+    
+    # Formular nur anzeigen, wenn show_add_user True ist
+    if st.session_state.show_add_user:
         st.subheader("Neuen Nutzer anlegen")
         with st.form("new_user_form"):
             new_name = st.text_input("Name")
             new_email = st.text_input("Email (wird als ID verwendet)")
             
-            submitted_new = st.form_submit_button("Nutzer speichern")
+            col1, col2 = st.columns(2)
+            with col1:
+                submitted_new = st.form_submit_button("Nutzer speichern")
+            with col2:
+                cancel = st.form_submit_button("Abbrechen")
             
             if submitted_new:
                 if new_name and new_email:
@@ -234,9 +278,14 @@ with tab2:
                         new_user = User(id=new_email, name=new_name)
                         new_user.store_data()
                         st.success(f"Nutzer {new_name} angelegt!")
+                        st.session_state.show_add_user = False
                         st.rerun()
                 else:
-                    st.warning("Bitte Name und Email eingeben.")        
+                    st.warning("Bitte Name und Email eingeben.")
+            
+            if cancel:
+                st.session_state.show_add_user = False
+                st.rerun()        
 with tab3:
     st.header("Reservierungen")
     
